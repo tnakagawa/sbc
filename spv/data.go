@@ -23,15 +23,15 @@ const (
 
 // Data is data type
 type Data struct {
-	btcnet  wire.BitcoinNet
+	name    string
 	datadir string
 	mutex   *sync.Mutex
 }
 
 // NewData returns a new Data
-func NewData(btcnet wire.BitcoinNet, datadir string) (*Data, error) {
+func NewData(name, datadir string) (*Data, error) {
 	data := &Data{}
-	data.btcnet = btcnet
+	data.name = name
 	data.datadir = datadir
 	data.mutex = new(sync.Mutex)
 	err := data.init()
@@ -87,8 +87,8 @@ func (data *Data) init() error {
 
 func (data *Data) openDb() (*sql.DB, error) {
 	data.mutex.Lock()
-	dataSourceName := fmt.Sprintf("file:%sheaders%x.db?cache=shared&mode=rwc", data.datadir, uint32(data.btcnet))
-	//log.Printf("%s", dataSourceName)
+	dataSourceName := fmt.Sprintf("file:%sheaders-%s.db?cache=shared&mode=rwc", data.datadir, data.name)
+	log.Printf("%s", dataSourceName)
 	db, err := sql.Open("sqlite3", dataSourceName)
 	if err != nil {
 		log.Printf("sql.Open Error : %+v", err)
@@ -109,28 +109,13 @@ func (data *Data) closeDb(db *sql.DB) {
 
 // KVS
 
-// Put puts key and val
-func (data *Data) Put(key string, val string) error {
-	return data.put(key, []byte(val))
-}
-
 // PutInt puts key and number
 func (data *Data) PutInt(key string, i int) error {
 	if i == 0 {
-		return data.put(key, []byte{0x00})
+		return data.Put(key, []byte{0x00})
 	}
 	bi := big.NewInt(int64(i))
-	return data.put(key, bi.Bytes())
-}
-
-// Get gets val by key
-func (data *Data) Get(key string) (string, error) {
-	bs, err := data.get(nil, key)
-	if err != nil {
-		log.Printf("data.get Error : %+v", err)
-		return "", err
-	}
-	return string(bs), nil
+	return data.Put(key, bi.Bytes())
 }
 
 // GetInt gets number by key
@@ -183,7 +168,7 @@ func (data *Data) Del(key string) error {
 	return nil
 }
 
-func (data *Data) put(key string, val []byte) error {
+func (data *Data) Put(key string, val []byte) error {
 	db, err := data.openDb()
 	defer data.closeDb(db)
 	if err != nil {
@@ -207,6 +192,10 @@ func (data *Data) put(key string, val []byte) error {
 		return err
 	}
 	return nil
+}
+
+func (data *Data) Get(key string) ([]byte, error) {
+	return data.get(nil, key)
 }
 
 func (data *Data) get(db *sql.DB, key string) ([]byte, error) {
@@ -303,22 +292,32 @@ func (data *Data) PutHeaders(headers []*wire.BlockHeader, startHeight int) error
 	return nil
 }
 
-// GetMinMaxHeight gets max and min height
-func (data *Data) GetMinMaxHeight() (int, int, error) {
+// GetMinMaxHeight gets count, max and min height
+// if count is zero, max and min is -1
+func (data *Data) GetCntMinMaxHeight() (int, int, int, error) {
 	db, err := data.openDb()
 	defer data.closeDb(db)
 	if err != nil {
 		log.Printf("data.openDb Error : %+v", err)
-		return -1, -1, err
+		return -1, -1, -1, err
+	}
+	var cnt int
+	err = db.QueryRow("SELECT COUNT(hash) FROM headers").Scan(&cnt)
+	if err != nil {
+		log.Printf("db.QueryRow Error : %+v", err)
+		return -1, -1, -1, err
+	}
+	if cnt == 0 {
+		return cnt, -1, -1, nil
 	}
 	var max int
 	var min int
 	err = db.QueryRow("SELECT MIN(height), MAX(height) FROM headers").Scan(&min, &max)
 	if err != nil {
 		log.Printf("db.QueryRow Error : %+v", err)
-		return -1, -1, err
+		return -1, -1, -1, err
 	}
-	return min, max, nil
+	return cnt, min, max, nil
 }
 
 func (data *Data) serialize(header *wire.BlockHeader) []byte {
@@ -328,6 +327,9 @@ func (data *Data) serialize(header *wire.BlockHeader) []byte {
 }
 
 func (data *Data) deserialize(bs []byte) (*wire.BlockHeader, error) {
+	if bs == nil {
+		return nil, nil
+	}
 	buf := &bytes.Buffer{}
 	_, err := buf.Write(bs)
 	if err != nil {

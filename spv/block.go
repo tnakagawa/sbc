@@ -3,7 +3,6 @@ package spv
 
 import (
 	"log"
-	"time"
 
 	"github.com/btcsuite/btcd/wire"
 )
@@ -32,7 +31,6 @@ func (spv *Spv) updateBlock() {
 }
 
 func (spv *Spv) recvBlock(block *wire.MsgBlock) {
-	s := time.Now()
 	header, height, err := spv.data.GetHeaderByHash(block.BlockHash())
 	if err != nil {
 		log.Printf("spv.data.GetHeaderByHash Error : %+v", err)
@@ -40,8 +38,20 @@ func (spv *Spv) recvBlock(block *wire.MsgBlock) {
 		return
 	}
 	if header == nil {
-		log.Printf("Not found header height : %d", height)
-		spv.errBlock = true
+		hash, height := spv.getInitHashHeight()
+		blockHash := block.BlockHash()
+		if !blockHash.IsEqual(hash) {
+			log.Printf("Not found header height : %d", height)
+			spv.errBlock = true
+			return
+		}
+		err := spv.data.PutHeaders([]*wire.BlockHeader{&block.Header}, height)
+		if err != nil {
+			log.Printf("spv.data.PutHeaders Error : %+v", err)
+			spv.errHeaders = true
+			return
+		}
+		spv.updateHeaders()
 		return
 	}
 	if height != spv.checkHeight {
@@ -63,6 +73,4 @@ func (spv *Spv) recvBlock(block *wire.MsgBlock) {
 	}
 	spv.checkHeight++
 	spv.updateBlock()
-	e := time.Now()
-	log.Printf("%d %fs", spv.checkHeight-1, e.Sub(s).Seconds())
 }

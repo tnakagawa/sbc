@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 )
@@ -22,7 +23,7 @@ type Spv struct {
 	status      int
 	con         net.Conn
 	pver        uint32
-	btcnet      wire.BitcoinNet
+	params      chaincfg.Params
 	errHeaders  bool
 	errBlock    bool
 	data        *Data
@@ -35,9 +36,9 @@ type Spv struct {
 }
 
 // NewSpv returns a new Spv
-func NewSpv(btcnet wire.BitcoinNet) (*Spv, error) {
+func NewSpv(params chaincfg.Params) (*Spv, error) {
 	spv := &Spv{}
-	spv.btcnet = btcnet
+	spv.params = params
 	spv.inv = false
 	spv.errHeaders = false
 	spv.errBlock = false
@@ -48,7 +49,7 @@ func NewSpv(btcnet wire.BitcoinNet) (*Spv, error) {
 		log.Printf("os.MkdirAll Error : %+v", err)
 		return nil, err
 	}
-	data, err := NewData(btcnet, dir)
+	data, err := NewData(params.Name, dir)
 	if err != nil {
 		log.Printf("NewData Error : %+v", err)
 		return nil, err
@@ -207,7 +208,7 @@ func (spv *Spv) sendMsg(msg wire.Message) {
 
 func (spv *Spv) recvHandler() {
 	for {
-		size, rmsg, _, err := wire.ReadMessageWithEncodingN(spv.con, spv.pver, spv.btcnet, wire.LatestEncoding)
+		size, rmsg, _, err := wire.ReadMessageWithEncodingN(spv.con, spv.pver, spv.params.Net, wire.LatestEncoding)
 		if err != nil {
 			log.Printf("wire.ReadMessageWithEncodingN error : %v", err)
 			if err == io.EOF {
@@ -272,7 +273,7 @@ func (spv *Spv) recvHandler() {
 
 func (spv *Spv) sendHandler() {
 	for msg := range spv.msgQueue {
-		size, err := wire.WriteMessageWithEncodingN(spv.con, msg, spv.pver, spv.btcnet, wire.LatestEncoding)
+		size, err := wire.WriteMessageWithEncodingN(spv.con, msg, spv.pver, spv.params.Net, wire.LatestEncoding)
 		if err != nil {
 			log.Printf("wire.WriteMessageWithEncodingN error : %v", err)
 			return
